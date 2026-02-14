@@ -8,6 +8,7 @@ import azure.cognitiveservices.speech as speechsdk
 from openai import AzureOpenAI
 from moviepy.video.VideoClip import ImageClip
 from moviepy.audio.io.AudioFileClip import AudioFileClip
+from moviepy.audio.AudioClip import concatenate_audioclips
 from moviepy.video.compositing.CompositeVideoClip import concatenate_videoclips
 from moviepy.video.fx.Resize import Resize
 from moviepy.video.io.VideoFileClip import VideoFileClip
@@ -16,6 +17,7 @@ from state import AgentState
 
 
 def _log_node_output(run_dir: str, node_name: str, payload: dict):
+    """Append a JSON line containing node metadata to the current run directory."""
     os.makedirs(run_dir, exist_ok=True)
     log_path = os.path.join(run_dir, "node_logs.jsonl")
     entry = {
@@ -29,6 +31,7 @@ def _log_node_output(run_dir: str, node_name: str, payload: dict):
 
 
 def _extract_title_from_content(raw_content: str, fallback: str) -> str:
+    """Return the first non-empty line from raw markdown as a human friendly title."""
     for line in raw_content.splitlines():
         candidate = line.strip().lstrip("#").strip()
         if candidate:
@@ -54,6 +57,7 @@ VIDEO_EXTENSIONS = (".mp4", ".mov", ".m4v", ".avi", ".webm", ".mkv")
 
 
 def _list_movie_files() -> list[str]:
+    """Collect usable background video files from the configured movie directory."""
     movie_dir = Config.MOVIE_DIR
     if not movie_dir or not os.path.isdir(movie_dir):
         return []
@@ -65,7 +69,7 @@ def _list_movie_files() -> list[str]:
 
 
 def fetch_articles_node(state: AgentState):
-    """articleフォルダから記事を取得し、ナレーション用に要約・整形する"""
+    """Load dated markdown articles in range and summarize them for narration."""
     target_articles = []
     start = datetime.strptime(state['start_date'], "%Y%m%d")
     end = datetime.strptime(state['end_date'], "%Y%m%d")
@@ -127,7 +131,8 @@ def fetch_articles_node(state: AgentState):
         "fetch_articles",
         {
             "article_count": len(target_articles),
-            "article_titles": [article['display_title'] for article in target_articles]
+            "article_titles": [article['display_title'] for article in target_articles],
+            "articles": target_articles
         }
     )
 
@@ -135,9 +140,13 @@ def fetch_articles_node(state: AgentState):
 
 
 def generate_assets_node(state: AgentState):
+    """Create narration audio, scripts, and illustrative prompts for each article."""
     audio_paths = []
     image_paths = []
     image_prompts = []
+    script_paths = []
+    voice_outputs = []
+    image_outputs = []
 
     run_dir = state.get('run_output_dir') or Config.OUTPUT_DIR
     os.makedirs(run_dir, exist_ok=True)
@@ -157,6 +166,20 @@ def generate_assets_node(state: AgentState):
             speech_config=speech_config, audio_config=audio_config)
         synthesizer.speak_text_async(article['content']).get()
         audio_paths.append(audio_path)
+
+        script_filename = f"script_{i}.txt"
+        script_path = os.path.join(run_dir, script_filename)
+        with open(script_path, "w", encoding="utf-8") as script_file:
+            script_file.write(article['content'])
+        script_paths.append(script_path)
+
+        voice_outputs.append({
+            "index": i,
+            "article_title": article.get('display_title') or article['title'],
+            "audio_path": audio_path,
+            "script_path": script_path,
+            "spoken_text": article['content']
+        })
 
         # 1. GPT-4oに「風景」としてのプロンプトを描写させる
         prompt_response = text_client.chat.completions.create(
@@ -190,21 +213,35 @@ def generate_assets_node(state: AgentState):
         )
 
         image_data = image_result.data[0]
+        image_location = None
         if image_data.url:
-            image_paths.append(image_data.url)
+            image_location = image_data.url
+            image_paths.append(image_location)
         else:
             image_filename = f"image_{i}.png"
             image_path = os.path.join(run_dir, image_filename)
             with open(image_path, "wb") as img_file:
                 img_file.write(base64.b64decode(image_data.b64_json))
-            image_paths.append(image_path)
+            image_location = image_path
+            image_paths.append(image_location)
+
+        image_outputs.append({
+            "index": i,
+            "article_title": article.get('display_title') or article['title'],
+            "prompt": img_prompt,
+            "image_path": image_location
+        })
 
     _log_node_output(
         run_dir,
         "generate_assets",
         {
             "audio_files": audio_paths,
-            "image_files": image_paths
+            "image_files": image_paths,
+            "script_files": script_paths,
+            "voice_outputs": voice_outputs,
+            "image_prompts": image_prompts,
+            "image_outputs": image_outputs
         }
     )
 
@@ -212,11 +249,13 @@ def generate_assets_node(state: AgentState):
         'audio_paths': audio_paths,
         'image_paths': image_paths,
         'image_prompts': image_prompts,
+        'script_paths': script_paths,
         'run_output_dir': run_dir
     }
 
 
 def create_short_video_node(state: AgentState):
+    """Combine generated images, stock footage, and narration into one short video."""
     clips = []
     run_dir = state.get('run_output_dir') or Config.OUTPUT_DIR
     os.makedirs(run_dir, exist_ok=True)
@@ -224,9 +263,13 @@ def create_short_video_node(state: AgentState):
     movie_files = _list_movie_files()
     video_sources: list[VideoFileClip] = []
     article_visual_logs = []
+    article_audio_clips: list[AudioFileClip] = []
+    audio_timeline = []
+    audio_cursor = 0.0
 
     for i, article in enumerate(state['articles']):
         audio = AudioFileClip(state['audio_paths'][i])
+        article_audio_clips.append(audio)
         duration = audio.duration or 0
         duration = max(duration, 0.001)
 
@@ -293,7 +336,19 @@ def create_short_video_node(state: AgentState):
             "movie_segments": movie_segments_log
         })
 
+        audio_timeline.append({
+            "article": article.get('display_title') or article['title'],
+            "audio_path": state['audio_paths'][i],
+            "start": round(audio_cursor, 2),
+            "duration": round(duration, 2)
+        })
+        audio_cursor += duration
+
     final_video = concatenate_videoclips(clips, method="compose")
+    final_audio = None
+    if article_audio_clips:
+        final_audio = concatenate_audioclips(article_audio_clips)
+        final_video.audio = final_audio
 
     try:
         final_video.write_videofile(
@@ -301,6 +356,16 @@ def create_short_video_node(state: AgentState):
         )
     finally:
         final_video.close()
+        if final_audio is not None:
+            try:
+                final_audio.close()
+            except Exception:
+                pass
+        for audio_clip in article_audio_clips:
+            try:
+                audio_clip.close()
+            except Exception:
+                pass
         for source in video_sources:
             try:
                 source.close()
@@ -313,7 +378,8 @@ def create_short_video_node(state: AgentState):
         {
             "video_path": output_path,
             "clip_count": len(clips),
-            "articles": article_visual_logs
+            "articles": article_visual_logs,
+            "audio_timeline": audio_timeline
         }
     )
 

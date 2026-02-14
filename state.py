@@ -16,5 +16,6 @@ class AgentState(TypedDict):
     image_prompts: list[str]
     audio_paths: list[str]
     image_paths: list[str]
+    script_paths: list[str]
     video_path: str | None
     error: str | None

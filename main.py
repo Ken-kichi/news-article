@@ -35,6 +35,7 @@ def generate(
         "image_prompts": [],
         "audio_paths": [],
         "image_paths": [],
+        "script_paths": [],
         "video_path": None,
         "error": None
     }

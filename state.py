@@ -12,10 +12,12 @@ class AgentState(TypedDict):
     start_date: str
     end_date: str
     run_output_dir: str
+    single_article_path: str | None
     articles: list[ArticleData]
-    image_prompts: list[str]
     audio_paths: list[str]
     image_paths: list[str]
     script_paths: list[str]
+    thumbnail_path: str | None
     video_path: str | None
+    youtube_metadata_path: str | None
     error: str | None

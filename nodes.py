@@ -142,11 +142,21 @@ def _generate_youtube_metadata(state: AgentState) -> dict:
 
     description = "\n".join(description_lines).strip()
     hashtags = _extract_hashtags(articles)
+    if articles:
+        primary = articles[0]
+        base_thumb = primary.get('display_title') or primary.get('title') or ""
+    else:
+        base_thumb = ""
+    if base_thumb:
+        thumbnail_title = base_thumb[:40]
+    else:
+        thumbnail_title = title[:40] if title else "最新ニュース"
 
     return {
         "title": title,
         "description": description,
-        "hashtags": hashtags
+        "hashtags": hashtags,
+        "thumbnail_title": thumbnail_title
     }
 
 
@@ -648,7 +658,7 @@ def generate_youtube_metadata_node(state: AgentState):
     ).strip()
 
     sections = [
-        "今回の記事",
+        "【内容】",
         note_line,
         zenn_line,
         "",
@@ -695,11 +705,13 @@ def generate_youtube_metadata_node(state: AgentState):
             "description": metadata['description'],
             "hashtags": metadata['hashtags'],
             "hashtags_line": hashtags_line or "#ニュース #ショート動画",
-            "thumbnail_file": os.path.basename(state.get('thumbnail_path')) if state.get('thumbnail_path') else None
+            "thumbnail_file": os.path.basename(state.get('thumbnail_path')) if state.get('thumbnail_path') else None,
+            "thumbnail_title": metadata['thumbnail_title']
         }
     )
 
     return {
         "youtube_metadata_path": metadata_path,
+        "thumbnail_title": metadata['thumbnail_title'],
         'run_output_dir': run_dir
     }

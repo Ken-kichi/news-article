@@ -18,6 +18,7 @@ class AgentState(TypedDict):
     image_paths: list[str]
     script_paths: list[str]
     thumbnail_path: str | None
+    thumbnail_title: str | None
     video_path: str | None
     youtube_metadata_path: str | None
     error: str | None

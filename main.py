@@ -105,6 +105,7 @@ def generate(
         "image_paths": [],
         "script_paths": [],
         "thumbnail_path": None,
+        "thumbnail_title": None,
         "video_path": None,
         "youtube_metadata_path": None,
         "error": None
@@ -157,6 +158,7 @@ def generate_single_article(
         "image_paths": [],
         "script_paths": [],
         "thumbnail_path": None,
+        "thumbnail_title": None,
         "video_path": None,
         "youtube_metadata_path": None,
         "error": None

@@ -75,69 +75,20 @@ def _resolve_article_argument(article_arg: str) -> tuple[str, str | None]:
 app = typer.Typer()
 
 
-@app.command()
-def generate(
-    start_date: Annotated[str, typer.Argument(help="開始日 (YYYYMMDD)")],
-    end_date: Annotated[str, typer.Argument(help="終了日 (YYYYMMDD)")]
-):
-    """
-    指定した期間(YYYYMMDD)のニュース記事からYouTubeショートを生成します。
-    """
-    typer.echo(f"🚀 処理を開始: {start_date} から {end_date}")
-
-    # グラフの構築とコンパイル
-    graph = create_graph()
-
-    # 初回ステートの初期化
-    base_output_dir = os.path.join(
-        Config.OUTPUT_DIR, f"{start_date}_{end_date}"
-    )
-    run_output_dir = _resolve_run_output_dir(base_output_dir)
-    os.makedirs(run_output_dir, exist_ok=True)
-
-    initial_state: AgentState = {
-        "start_date": start_date,
-        "end_date": end_date,
-        "run_output_dir": run_output_dir,
-        "single_article_path": None,
-        "articles": [],
-        "audio_paths": [],
-        "image_paths": [],
-        "script_paths": [],
-        "thumbnail_path": None,
-        "thumbnail_title": None,
-        "video_path": None,
-        "youtube_metadata_path": None,
-        "error": None
-    }
-
-    # LangGraphの実行
-    try:
-        for output in graph.stream(initial_state):
-            for node_name, state_update in output.items():
-                typer.echo(f"✅ Node [{node_name}] が完了しました")
-
-        typer.echo(f"✨ 全工程が完了しました！ output/ フォルダを確認してください。")
-    except Exception as e:
-        typer.secho(f"❌ エラーが発生しました: {e}", fg=typer.colors.RED)
-
-
-@app.command("generate-article")
+@app.command("generate")
 def generate_single_article(
-    article_identifier: Annotated[str, typer.Argument(help="記事の8桁日付または記事ファイルパス")],
-    date_override: Annotated[str | None, typer.Option(
-        help="出力日時 (YYYYMMDD)。省略時は記事情報から推測)")] = None,
+    article_identifier: Annotated[
+        str,
+        typer.Argument(help="記事の8桁日付または記事ファイルパス")
+    ]
 ):
     """
     単一の記事ファイルからYouTubeショートを生成します。
     """
     article_path, inferred_date = _resolve_article_argument(article_identifier)
 
-    if date_override and not re.match(r"^\d{8}$", date_override):
-        raise typer.BadParameter("date は YYYYMMDD 形式で指定してください。")
-
     date_from_file, slug = _extract_article_meta(article_path)
-    date_str = date_override or inferred_date or date_from_file
+    date_str = inferred_date or date_from_file
     safe_slug = _sanitize_slug(slug)
 
     graph = create_graph()

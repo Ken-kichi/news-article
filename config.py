@@ -1,11 +1,12 @@
 import os
 from dotenv import load_dotenv
 
+# .envファイルから環境変数を取り込む
 load_dotenv()
 
 
 def _split_endpoint(endpoint: str | None) -> tuple[str | None, str | None]:
-    """Return (resource_base_url, api_version) extracted from a raw endpoint."""
+    """生のエンドポイントURLからベースURLとAPIバージョンを抽出して返す。"""
     if not endpoint:
         return None, None
 
@@ -32,18 +33,18 @@ _image_endpoint, _image_version = _split_endpoint(_raw_image_endpoint)
 
 
 class Config:
-    # Azure OpenAI text
+    # Azure OpenAI（テキスト生成）
     AZURE_TEXT_API_KEY = os.getenv("AZURE_TEXT_API_KEY")
     AZURE_TEXT_ENDPOINT = _text_endpoint
     AZURE_TEXT_API_VERSION = os.getenv("AZURE_TEXT_API_VERSION", _text_version or "2024-02-01-preview")
     AZURE_OPENAI_DEPLOYMENT_NAME = "gpt-4.1"
 
-    # Azure AI Speech
+    # Azure AI Speech（音声合成）
     AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY")
     AZURE_SPEECH_ENDPOINT = os.getenv("AZURE_SPEECH_ENDPOINT")
     AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION")
 
-    # Azure Image
+    # Azure Image（画像生成）
     AZURE_IMAGE_API_KEY = os.getenv("AZURE_IMAGE_KEY")
     AZURE_IMAGE_ENDPOINT = _image_endpoint
     AZURE_IMAGE_API_VERSION = os.getenv("AZURE_IMAGE_API_VERSION", _image_version or "2023-12-01-preview")

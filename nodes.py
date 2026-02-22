@@ -17,7 +17,7 @@ from state import AgentState
 
 
 def _log_node_output(run_dir: str, node_name: str, payload: dict):
-    """Append a JSON line containing node metadata to the current run directory."""
+    """各ノードのメタデータをJSON行として現在の実行ディレクトリへ追記する。"""
     os.makedirs(run_dir, exist_ok=True)
     log_path = os.path.join(run_dir, "node_logs.jsonl")
     entry = {
@@ -31,7 +31,7 @@ def _log_node_output(run_dir: str, node_name: str, payload: dict):
 
 
 def _extract_title_from_content(raw_content: str, fallback: str) -> str:
-    """Return the first non-empty line from raw markdown as a human friendly title."""
+    """Markdown本文で最初の非空行を見出しとして取得し、人が読めるタイトルを返す。"""
     for line in raw_content.splitlines():
         candidate = line.strip().lstrip("#").strip()
         if candidate:
@@ -57,7 +57,7 @@ VIDEO_EXTENSIONS = (".mp4", ".mov", ".m4v", ".avi", ".webm", ".mkv")
 
 
 def _list_movie_files() -> list[str]:
-    """Collect usable background video files from the configured movie directory."""
+    """設定済みのmovieディレクトリから利用可能な背景動画を収集する。"""
     movie_dir = Config.MOVIE_DIR
     if not movie_dir or not os.path.isdir(movie_dir):
         return []
@@ -69,7 +69,7 @@ def _list_movie_files() -> list[str]:
 
 
 def _format_date_label(date_str: str) -> str:
-    """Convert YYYYMMDD into YYYY/MM/DD for display."""
+    """YYYYMMDD形式を表示用のYYYY/MM/DD表記へ変換する。"""
     try:
         return datetime.strptime(date_str, "%Y%m%d").strftime("%Y/%m/%d")
     except ValueError:
@@ -77,14 +77,14 @@ def _format_date_label(date_str: str) -> str:
 
 
 def _format_date_range_label(start: str, end: str) -> str:
-    """Create a human-friendly date range label."""
+    """人が見て分かりやすい日付レンジ表現を作成する。"""
     start_label = _format_date_label(start)
     end_label = _format_date_label(end)
     return start_label if start == end else f"{start_label} - {end_label}"
 
 
 def _clean_hashtag_text(text: str) -> str:
-    """Normalize text so it can sit behind a YouTube hashtag."""
+    """YouTubeのハッシュタグとして使えるようにテキストを正規化する。"""
     cleaned = re.sub(r"[#＃]", "", text)
     cleaned = re.sub(r"\s+", "", cleaned)
     cleaned = re.sub(r"[^\wぁ-んァ-ヶ一-龯ー]+", "", cleaned)
@@ -92,7 +92,7 @@ def _clean_hashtag_text(text: str) -> str:
 
 
 def _extract_hashtags(articles: list[dict]) -> list[str]:
-    """Build a short list of hashtags derived from article titles."""
+    """記事タイトルから派生させたハッシュタグの短いリストを生成する。"""
     hashtags: list[str] = []
     for article in articles:
         candidate = article.get('display_title') or article.get('title')
@@ -115,7 +115,7 @@ def _extract_hashtags(articles: list[dict]) -> list[str]:
 
 
 def _generate_youtube_metadata(state: AgentState) -> dict:
-    """Compose a YouTube-ready title, description, and hashtags from the run state."""
+    """エージェント状態からYouTube向けのタイトル・説明文・ハッシュタグを組み立てる。"""
     articles = state.get('articles', [])
     range_label = _format_date_range_label(
         state['start_date'], state['end_date'])
@@ -161,7 +161,7 @@ def _generate_youtube_metadata(state: AgentState) -> dict:
 
 
 def _format_timestamp(seconds: float) -> str:
-    """Return SBV timestamp (H:MM:SS.mmm)."""
+    """SBV形式（H:MM:SS.mmm）のタイムスタンプ文字列を生成する。"""
     milliseconds = max(0, int(round(seconds * 1000)))
     hours, remainder = divmod(milliseconds, 3600 * 1000)
     minutes, remainder = divmod(remainder, 60 * 1000)
@@ -170,7 +170,7 @@ def _format_timestamp(seconds: float) -> str:
 
 
 def _split_sentences_for_captions(text: str) -> list[str]:
-    """Split narration text into SBV-friendly chunks."""
+    """ナレーション文章をSBVファイルに適した粒度へ分割する。"""
     if not text:
         return []
 
@@ -189,7 +189,7 @@ def _split_sentences_for_captions(text: str) -> list[str]:
 
 
 def _build_sbv_caption(text: str, duration: float | None) -> str:
-    """Generate SBV caption text with pseudo-timed segments."""
+    """文章と想定尺から疑似タイミング付きSBV字幕を生成する。"""
     sentences = _split_sentences_for_captions(text)
     if not sentences:
         sentences = ["（内容なし）"]
@@ -221,8 +221,9 @@ def _build_sbv_caption(text: str, duration: float | None) -> str:
 
 
 def fetch_articles_node(state: AgentState):
-    """Load dated markdown articles in range and summarize them for narration."""
+    """日付レンジ内のMarkdown記事を読み込み、ナレーション向けに要約する。"""
     target_articles = []
+    # フィルタ計算に備えて日時に変換しておく
     start = datetime.strptime(state['start_date'], "%Y%m%d")
     end = datetime.strptime(state['end_date'], "%Y%m%d")
     run_dir = state.get('run_output_dir') or Config.OUTPUT_DIR
@@ -232,7 +233,7 @@ def fetch_articles_node(state: AgentState):
     if not single_article_path and not os.path.exists(Config.ARTICLE_DIR):
         os.makedirs(Config.ARTICLE_DIR)
 
-    # 1. ファイルのフィルタリング
+    # 1. ファイルのフィルタリング（単一指定か日付レンジかで分岐）
     files_to_process: list[tuple[str, str, str]] = []
     if single_article_path:
         if not os.path.isfile(single_article_path):
@@ -311,7 +312,7 @@ def fetch_articles_node(state: AgentState):
 
 
 def generate_audio_assets_node(state: AgentState):
-    """Create narration audio files and scripts for each article."""
+    """各記事のナレーション音声と字幕ファイルを生成する。"""
     audio_paths = []
     script_paths = []
     voice_outputs = []
@@ -320,6 +321,7 @@ def generate_audio_assets_node(state: AgentState):
     os.makedirs(run_dir, exist_ok=True)
 
     for i, article in enumerate(state['articles']):
+        # 音声合成の設定を記事ごとに初期化（1本ずつ別ファイルに保存する）
         # 各記事ごとに Azure Speech を設定（音声スタイルを統一）
         speech_config = speechsdk.SpeechConfig(
             subscription=Config.AZURE_SPEECH_KEY,
@@ -394,7 +396,7 @@ def generate_audio_assets_node(state: AgentState):
 
 
 def generate_visual_assets_node(state: AgentState):
-    """Create illustrative prompts and images for each article."""
+    """記事ごとに解説用イラストのプロンプトと画像を生成する。"""
     image_paths = []
     image_prompts = []
     image_outputs = []
@@ -403,6 +405,7 @@ def generate_visual_assets_node(state: AgentState):
     os.makedirs(run_dir, exist_ok=True)
 
     for i, article in enumerate(state['articles']):
+        # まずは記事内容から英語のプロンプトを生成してビジュアル方針を決める
         # GPT に映画的な風景プロンプトを作らせる（FLUX用）
         prompt_response = text_client.chat.completions.create(
             model=Config.AZURE_OPENAI_DEPLOYMENT_NAME,
@@ -500,7 +503,7 @@ def generate_visual_assets_node(state: AgentState):
 
 
 def create_short_video_node(state: AgentState):
-    """Combine generated images, stock footage, and narration into one short video."""
+    """生成済みの静止画・ストック映像・ナレーション音声を結合し短尺動画を作る。"""
     clips = []
     run_dir = state.get('run_output_dir') or Config.OUTPUT_DIR
     os.makedirs(run_dir, exist_ok=True)
@@ -513,6 +516,7 @@ def create_short_video_node(state: AgentState):
     audio_cursor = 0.0
 
     for i, article in enumerate(state['articles']):
+        # 記事ごとのオーディオとビジュアルを 1 クリップにまとめる
         audio = AudioFileClip(state['audio_paths'][i])
         article_audio_clips.append(audio)
         duration = audio.duration or 0
@@ -535,6 +539,7 @@ def create_short_video_node(state: AgentState):
         remaining = duration - image_intro_duration
 
         while remaining > 1e-3 and movie_files:
+            # ストック映像をランダムに差し込み、静止画だけの単調さを抑える
             movie_path = random.choice(movie_files)
             try:
                 video_clip = VideoFileClip(movie_path)
@@ -571,6 +576,7 @@ def create_short_video_node(state: AgentState):
         if remaining > 1e-3:
             segments.append(base_image.with_duration(remaining))
 
+        # 静止画と動画セグメントを結合し、記事ごとのショートクリップを完成させる
         article_video = concatenate_videoclips(
             segments, method="compose").with_duration(duration)
         article_video.audio = audio
@@ -635,7 +641,7 @@ def create_short_video_node(state: AgentState):
 
 
 def generate_youtube_metadata_node(state: AgentState):
-    """Produce a YouTube-ready title, description, and hashtag set."""
+    """YouTube投稿用のタイトル・説明文・ハッシュタグを整備する。"""
     run_dir = state.get('run_output_dir') or Config.OUTPUT_DIR
     os.makedirs(run_dir, exist_ok=True)
 

@@ -474,12 +474,11 @@ class AgentState(TypedDict):
 
 Stateを見れば「現在どのデータが生成済みで、どこで止まっているのか」が完璧に把握できます。これは本番環境での運用において、エラー時の原因究明や、失敗した工程からの部分的な再実行（レジューム機能）を実装する際の強力な武器となります。
 
----
 
 **データ構造が定義できました。次はいよいよ、これらのデータを加工する「各ノードの実装」という本丸に乗り込みます。**
 
 
-### nodes.py（処理ノード実装）
+## 処理ノード実装 (`nodes.py`)
 いよいよ、システムの心臓部である各ノードの実装を解説します。このファイルでは、LangGraphの各ノードが「何を考え、どう動くのか」を定義しています。
 
 単なる「作業の自動化」に留まらず、AIによる要約・画像プロンプト生成・動画合成という、クリエイティブな工程を一つのパイプラインに凝縮しています。
@@ -1282,7 +1281,7 @@ base_image = base_image.with_effects([
 
 LangGraphの真骨頂は、複雑な処理を **DAG（有向非巡回グラフ）** として定義できる点にあります。これにより、どこから始まり、どの順番でデータが流れ、どこで終わるのかという「依存関係」が明確になります。
 
-### グラフ定義コード (`graph.py`)
+## グラフ定義コード (`graph.py`)
 
 ```python
 from langgraph.graph import StateGraph, END
@@ -1352,7 +1351,7 @@ LangGraphは各ステップの「State」を保持するため、もし途中で
 システムの「顔」となるエントリーポイント (`main.py`) を構築します。
 ここでは、モダンなCLIライブラリである **Typer** を採用し、直感的な操作感と堅牢なファイル管理を実現しています。
 
-### メインプログラム (`main.py`)
+## メインプログラム (`main.py`)
 
 ```python
 import os
@@ -1364,10 +1363,12 @@ from graph import create_graph
 from state import AgentState
 from config import Config
 
+
 def _resolve_run_output_dir(base_path: str) -> str:
-    """同名ディレクトリが存在する場合、ver_n を付与して上書きを防止する"""
+    """同名ディレクトリが存在する場合は末尾に ver_n を付けて重複を避ける"""
     if not os.path.exists(base_path):
         return base_path
+
     version = 1
     while True:
         candidate = f"{base_path}_ver_{version}"
@@ -1375,47 +1376,85 @@ def _resolve_run_output_dir(base_path: str) -> str:
             return candidate
         version += 1
 
+
+def _extract_article_meta(article_path: str) -> tuple[str, str]:
+    """ファイル名から日付とスラグを取得。形式外の場合は当日の日付を利用。"""
+    basename = os.path.basename(article_path)
+    name_no_ext, _ = os.path.splitext(basename)
+    match = re.match(r"(\d{8})_(.+)", name_no_ext)
+    if match:
+        return match.group(1), match.group(2)
+    today = datetime.now().strftime("%Y%m%d")
+    return today, name_no_ext or today
+
+
+def _sanitize_slug(slug: str) -> str:
+    cleaned = re.sub(r"[^\w\-]+", "_", slug)
+    return cleaned.strip("_") or "article"
+
+
 def _resolve_article_argument(article_arg: str) -> tuple[str, str | None]:
     """
-    引数がファイルパスならそのまま、8桁の日付なら該当ファイルを探索。
-    運用の柔軟性を高めるためのヘルパー関数です。
+    引数がファイルパスならそのまま返し、8桁の日付なら article/ 内のファイルを探索して返す。
+    戻り値は (絶対パス, 推定日付 or None)。
     """
     candidate_path = os.path.abspath(article_arg)
     if os.path.isfile(candidate_path):
         return candidate_path, None
 
-    # 日付（YYYYMMDD）指定の場合の自動探索ロジック
+    if not os.path.isabs(article_arg):
+        relative_path = os.path.abspath(
+            os.path.join(Config.ARTICLE_DIR, article_arg))
+        if os.path.isfile(relative_path):
+            return relative_path, None
+
     if re.match(r"^\d{8}$", article_arg):
         date_str = article_arg
         article_dir = Config.ARTICLE_DIR
-        matches = [n for n in os.listdir(article_dir) if n.startswith(f"{date_str}_") and n.endswith(".md")]
+        if not os.path.isdir(article_dir):
+            raise typer.BadParameter("article ディレクトリが存在しません。")
+        matches = [
+            name for name in os.listdir(article_dir)
+            if name.startswith(f"{date_str}_") and name.endswith(".md")
+        ]
         if not matches:
-            raise typer.BadParameter(f"[{date_str}] で始まる記事が見つかりません。")
+            raise typer.BadParameter(f"{date_str} で始まる記事ファイルが見つかりません。")
         if len(matches) > 1:
-            raise typer.BadParameter(f"複数の記事がヒットしました。ファイルパスで直接指定してください。")
+            raise typer.BadParameter(
+                f"{date_str} の記事が複数あります。ファイルパスで指定してください。"
+            )
         return os.path.abspath(os.path.join(article_dir, matches[0])), date_str
 
-    raise typer.BadParameter("8桁の日付、または記事ファイルパスを指定してください。")
+    raise typer.BadParameter("8桁の日付または記事ファイルパスを指定してください。")
 
-app = typer.Typer(help="ニュース動画自動生成CLI")
+
+app = typer.Typer()
+
 
 @app.command("generate")
 def generate_single_article(
-    article_identifier: Annotated[str, typer.Argument(help="記事の8桁日付 または ファイルパス")]
+    article_identifier: Annotated[
+        str,
+        typer.Argument(help="記事の8桁日付または記事ファイルパス")
+    ]
 ):
     """
-    指定した記事からYouTube Shorts素材を一気通貫で生成します。
+    単一の記事ファイルからYouTubeショートを生成します。
     """
-    # パスと日付の解決
     article_path, inferred_date = _resolve_article_argument(article_identifier)
-    date_str = inferred_date or datetime.now().strftime("%Y%m%d")
 
-    # 出力ディレクトリの決定（整理しやすい命名規則）
-    slug = os.path.splitext(os.path.basename(article_path))[0]
-    run_output_dir = _resolve_run_output_dir(os.path.join(Config.OUTPUT_DIR, slug))
+    date_from_file, slug = _extract_article_meta(article_path)
+    date_str = inferred_date or date_from_file
+    safe_slug = _sanitize_slug(slug)
+
+    graph = create_graph()
+
+    base_output_dir = os.path.join(
+        Config.OUTPUT_DIR, f"{date_str}_{safe_slug}"
+    )
+    run_output_dir = _resolve_run_output_dir(base_output_dir)
     os.makedirs(run_output_dir, exist_ok=True)
 
-    # 初期状態（State）のセットアップ
     initial_state: AgentState = {
         "start_date": date_str,
         "end_date": date_str,
@@ -1432,20 +1471,16 @@ def generate_single_article(
         "error": None
     }
 
-    typer.secho(f"🚀 動画生成パイプラインを起動します...", fg=typer.colors.CYAN, bold=True)
-
+    typer.echo(f"🚀 単体記事モードで処理を開始")
     try:
-        # LangGraphのストリーミング実行で進捗を表示
-        graph = create_graph()
         for output in graph.stream(initial_state):
-            for node_name, _ in output.items():
-                typer.echo(f"  ✅ Node [{node_name}] 完了")
+            for node_name, state_update in output.items():
+                typer.echo(f"✅ Node [{node_name}] が完了しました")
 
-        typer.secho(f"\n✨ すべての工程が完了しました！", fg=typer.colors.GREEN, bold=True)
-        typer.echo(f"📁 成果物: {run_output_dir}")
-
+        typer.echo(f"✨ 完了: {run_output_dir} を確認してください。")
     except Exception as e:
-        typer.secho(f"❌ 致命的なエラー: {e}", fg=typer.colors.RED, err=True)
+        typer.secho(f"❌ エラーが発生しました: {e}", fg=typer.colors.RED)
+
 
 if __name__ == "__main__":
     app()
